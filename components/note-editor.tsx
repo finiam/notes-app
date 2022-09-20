@@ -1,4 +1,10 @@
-import React, { useState, useEffect, ChangeEvent, FormEvent } from "react";
+import React, {
+  useState,
+  useEffect,
+  ChangeEvent,
+  FormEvent,
+  useRef,
+} from "react";
 import { v4 as uuidv4 } from "uuid";
 import NoteTags from "./note-tags";
 import NoteBody from "./note-body";
@@ -11,7 +17,7 @@ import SaveSVG from "../assets/save.svg";
 import ShareSVG from "../assets/share.svg";
 import BackSVG from "../assets/back.svg";
 import { encryptData } from "../lib/utils/crypto";
-import { PublicNoteType } from "..";
+import { NoteType, PublicNoteType } from "..";
 
 export default function NoteEditor() {
   const {
@@ -25,6 +31,7 @@ export default function NoteEditor() {
     },
     session: { openNote, setOpenNote, setStatus },
   } = useStore();
+  const prevNote = useRef<NoteType | null>();
   const [editNote, setEditNote] = useState<boolean>(false);
   const [editTags, setEditTags] = useState<boolean>(false);
   const [name, setName] = useState<string>("");
@@ -46,6 +53,8 @@ export default function NoteEditor() {
   };
 
   useEffect(() => {
+    if (prevNote.current) saveNote(prevNote.current);
+
     resetState();
 
     if (!openNote) return;
@@ -55,7 +64,9 @@ export default function NoteEditor() {
     if (openNote.content) setContent(openNote.content);
 
     if (openNote.tags) setTags(openNote.tags);
-  }, [openNote]);
+
+    prevNote.current = openNote;
+  }, [openNote?.id]);
 
   useEffect(() => {
     const handleKeyDown = async (ev: KeyboardEvent) => {
@@ -70,11 +81,13 @@ export default function NoteEditor() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const saveNote = async (ev: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (ev: FormEvent<HTMLFormElement>) => {
     ev.preventDefault();
 
-    if (!openNote) return;
+    if (openNote) saveNote(openNote);
+  };
 
+  async function saveNote(note: NoteType) {
     if (!updateName && !updateContent && !updateTags) return;
 
     setStatus("loading", "Saving...");
@@ -85,17 +98,21 @@ export default function NoteEditor() {
       content,
       tags,
     };
-    const update = await updateNote(openNote.id, updatedNote, signedKey);
+
+    const update = await updateNote(note.id, updatedNote, signedKey);
 
     if (update) {
       setStatus("ok", "Saved note");
-      setOpenNote({
-        ...openNote,
-        content: updatedNote.content,
-        tags: updatedNote.tags,
-        name: updatedNote.name,
-        slug: updatedNote.slug,
-      });
+
+      if (openNote?.id === note.id) {
+        setOpenNote({
+          ...openNote,
+          content: updatedNote.content,
+          tags: updatedNote.tags,
+          name: updatedNote.name,
+          slug: updatedNote.slug,
+        });
+      }
     } else {
       setStatus("error", "Something went wrong");
     }
@@ -103,7 +120,7 @@ export default function NoteEditor() {
     setUpdateName(false);
     setUpdateContent(false);
     setUpdateTags(false);
-  };
+  }
 
   const deleteNote = async () => {
     if (!openNote) return;
@@ -152,11 +169,6 @@ export default function NoteEditor() {
   const toggleEditTags = async () => {
     if (!openNote) return;
 
-    if (editTags && updateTags) {
-      updateNote(openNote.id, { tags }, signedKey);
-      setUpdateTags(false);
-    }
-
     if (!editTags) setEditNote(false);
 
     setEditTags((prevEditTags) => !prevEditTags);
@@ -165,13 +177,15 @@ export default function NoteEditor() {
   const handleShare = async () => {
     if (!openNote) return;
 
+    await saveNote(openNote);
+
     setStatus("loading", "Generating URL...");
 
     const publicKey = uuidv4();
     const newPublicNote = {
-      name: encryptData(openNote.name, publicKey),
-      content: encryptData(openNote.content, publicKey),
-      tags: encryptData(openNote.tags, publicKey),
+      name: encryptData(name, publicKey),
+      content: encryptData(content, publicKey),
+      tags: encryptData(tags, publicKey),
     };
 
     const publicNote = publicNotes.find(
@@ -208,7 +222,7 @@ export default function NoteEditor() {
     <div className="h-screen w-full">
       {openNote && (
         <form
-          onSubmit={saveNote}
+          onSubmit={handleSubmit}
           className="grid h-full grid-rows-[auto,_1fr] sm:grid-rows-[4.5rem,_1fr]"
         >
           <div className="grid h-full grid-cols-[1fr,_auto] items-center gap-x-3 bg-light-2 px-3 py-2 dark:bg-dark-3 sm:grid-cols-[1fr,_auto] sm:py-0">
@@ -232,7 +246,7 @@ export default function NoteEditor() {
                 className={`${
                   editTags &&
                   "bg-green text-light-1 dark:bg-pistachio dark:text-dark-1"
-                } p-2`}
+                } rounded-md p-2`}
                 onClick={toggleEditTags}
               >
                 <TagsSVG className="h-6 w-6 fill-current" />
@@ -243,7 +257,7 @@ export default function NoteEditor() {
                 className={`${
                   editNote &&
                   "bg-green text-light-1 dark:bg-pistachio dark:text-dark-1"
-                } p-2`}
+                } rounded-md p-2`}
                 onClick={toggleEditNote}
               >
                 <EditSVG className="h-6 w-6 stroke-current stroke-[1.5]" />
@@ -251,7 +265,7 @@ export default function NoteEditor() {
               <button
                 type="button"
                 title="Delete note"
-                className="p-2 active:bg-green active:text-light-1 dark:active:bg-pistachio active:dark:text-dark-1"
+                className="rounded-md p-2 active:bg-green active:text-light-1 dark:active:bg-pistachio active:dark:text-dark-1"
                 onClick={deleteNote}
               >
                 <TrashSVG className="h-7 w-7 stroke-current stroke-2" />
@@ -259,14 +273,14 @@ export default function NoteEditor() {
               <button
                 type="submit"
                 title="Save changes"
-                className="p-2 active:bg-green active:text-light-1 dark:active:bg-pistachio active:dark:text-dark-1"
+                className="rounded-md p-2 active:bg-green active:text-light-1 dark:active:bg-pistachio active:dark:text-dark-1"
               >
                 <SaveSVG className="h-7 w-7 fill-current" />
               </button>
               <button
                 type="button"
                 title="Share note"
-                className="p-2 active:bg-green active:text-light-1 dark:active:bg-pistachio active:dark:text-dark-1"
+                className="rounded-md p-2 active:bg-green active:text-light-1 dark:active:bg-pistachio active:dark:text-dark-1"
                 onClick={handleShare}
               >
                 <ShareSVG className="h-6 w-6 fill-current" />
